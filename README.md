@@ -1,164 +1,82 @@
 # Real-Time Order Analytics Pipeline
 
-## Overview
+An end-to-end event streaming and analytics pipeline demonstrating how to ingest, process, and visualize high-throughput e-commerce transactions in real-time.
 
-A comprehensive real-time e-commerce analytics pipeline that simulates order events, ingests them through Apache Kafka, processes them with PySpark Structured Streaming, and writes the results to both MinIO (for raw event storage) and MongoDB (for aggregated analytics). A Streamlit dashboard is provided to view the real-time analytics.
+**🌐 Live Public Demo:** [https://share.streamlit.io/](https://share.streamlit.io/) (Portfolio Demo Mode)  
+**🐙 GitHub Repository:** [https://github.com/jain6604/real-time-order-analytics-pipeline](https://github.com/jain6604/real-time-order-analytics-pipeline)
 
-## Architecture
+---
 
-```text
-                    Python
-              Order Generator
-                     │
-                     ▼
-                Kafka Producer
-                     │
-                     ▼
-              Apache Kafka
-                order-events
-                     │
-                     ▼
-        PySpark Structured Streaming
-                     │
-             ┌───────┴────────┐
-             │                │
-             ▼                ▼
-           MinIO           MongoDB
-        Raw Events       Processed Analytics
-                             │
-                             ▼
-                        Streamlit
-                         Dashboard
+## 🎯 What This Project Does
+
+This project simulates a real-world data engineering architecture. It generates e-commerce orders, streams them through an Apache Kafka message broker, processes them with PySpark Structured Streaming to compute tumbling window metrics, archives the raw data into a MinIO Data Lake, and serves ultra-low latency analytics to a web dashboard via MongoDB.
+
+### 🎮 The Public Demo Experience
+The live public deployment runs in a specialized **Demo Mode** designed for recruiters and portfolio visitors at zero cost. It operates independently of the local backend:
+- Click **"Simulate New Orders"** to generate new interactive sample data on the fly.
+- Filter data dynamically by **City** and **Product**.
+- View interactive charts for Revenue Trends, Top Products, and City Contributions.
+- Download a CSV of the filtered recent orders.
+- The UI explicitly displays `DEMO MODE` to clarify that it is using simulated data without spinning up cloud clusters.
+
+### ⚙️ The Local Live Pipeline
+When you run the project locally, the dashboard automatically detects the backend and switches to **Live Pipeline** mode. It reads strictly from the MongoDB metrics collections powered continuously by PySpark and Kafka, proving the robust data platform architecture.
+
+---
+
+## 🏗️ Architecture & Tech Stack
+
+```mermaid
+flowchart LR
+    Producer[Python Generator] -->|Raw Events| Kafka[Apache Kafka]
+    Kafka -->|Stream| Spark[PySpark Streaming]
+    Spark -->|Raw Parquet| MinIO[MinIO Data Lake]
+    Spark -->|5-min Aggregations| Mongo[(MongoDB)]
+    Mongo -->|Low-Latency Query| Streamlit[Streamlit Dashboard]
 ```
 
-## Tech Stack
+- **Data Generation:** Python 3.12
+- **Message Broker:** Apache Kafka (KRaft mode, no ZooKeeper)
+- **Stream Processing:** PySpark Structured Streaming (3.5.3)
+- **Serving Layer:** MongoDB (7.0) for fast aggregate queries
+- **Data Lake (Cold Storage):** MinIO (S3-compatible object storage)
+- **Visualization:** Streamlit
+- **Orchestration:** Docker Compose
+- **CI/CD:** GitHub Actions (Unit testing & Docker validation)
 
-- **Python (3.12)**: Order generation, Kafka producer, and Streamlit dashboard.
-- **Apache Kafka (3.9.0)**: Real-time event broker (running in KRaft mode).
-- **PySpark Structured Streaming (3.5.3)**: Stream processing and aggregation.
-- **MongoDB (7.0)**: Low-latency NoSQL database for fast dashboard queries.
-- **MinIO**: S3-compatible object storage for data lake (raw event persistence).
-- **Docker & Docker Compose**: Containerization and service orchestration.
-- **Streamlit**: Interactive web-based data dashboard.
+---
 
-## Data Flow
-
-1. **Order Generation**: A Python script generates random but realistic e-commerce order events (JSON format) containing fields like `order_id`, `product`, `quantity`, `price`, `city`, and `timestamp`.
-2. **Kafka Ingestion**: The Kafka producer sends these serialized JSON events to the `order-events` Kafka topic.
-3. **Stream Processing**: A PySpark Structured Streaming job consumes events from the `order-events` topic in real time. It parses the JSON, casts types, and calculates total sales (`quantity * price`) for each event.
-4. **Raw Data Lake (MinIO)**: The PySpark job writes the raw, parsed events continuously into MinIO (S3-compatible) as Parquet files, providing a historical record of all events.
-5. **Real-time Analytics (MongoDB)**: Independently of raw persistence, PySpark computes five-minute tumbling event-time windows. It upserts both window totals (sales, quantity, and order count) and product-level metrics to MongoDB; the dashboard uses product metrics to show top sellers.
-6. **Dashboard Visualization**: A Streamlit application queries MongoDB to display the latest KPIs, sales trends, and top-selling products.
-
-## Kafka Concepts
-
-- **Broker**: A Kafka server that stores and serves the events. We run a single broker in KRaft mode (no ZooKeeper).
-- **Topic**: A logical channel where events are published. We use `order-events`.
-- **Partition**: A topic is divided into partitions for scalability. We use 1 partition for simplicity.
-- **Producer**: The Python client that sends data to the topic.
-- **Consumer**: A client (like our Spark job or Python consumer) that reads data from the topic.
-- **Offset**: A unique identifier for a message within a partition, allowing consumers to track their progress.
-- **Consumer Group**: A group of consumers that cooperate to consume a topic.
-
-## Spark Concepts
-
-- **DataFrame**: A distributed collection of data organized into named columns.
-- **Structured Streaming**: A scalable and fault-tolerant stream processing engine built on the Spark SQL engine.
-- **Schema**: Explicitly defining the structure of the JSON data (e.g., `StructType`) ensures data quality and allows Spark to parse it efficiently.
-- **from_json**: A Spark SQL function to parse a JSON string column into a struct using a given schema.
-- **Watermark**: This project uses a one-minute event-time watermark. Spark keeps window state bounded; an event older than one minute behind the greatest observed event time can be excluded from its aggregate.
-- **Window**: Grouping data based on event-time windows (e.g., 5-minute intervals) for temporal aggregations.
-- **Checkpoint**: Saving the streaming state to a reliable storage (like MinIO) to recover from failures exactly where it left off.
-
-## Storage Decisions
-
-- **MongoDB**: Chosen for the processed analytics layer. It provides fast, flexible document storage that is ideal for serving real-time, frequently updated metrics to a web dashboard.
-- **MinIO**: Acts as our local S3-compatible data lake. It is designed for high-throughput, immutable object storage, making it the perfect choice for archiving our raw event data (in Parquet format) for future batch processing or machine learning tasks.
-
-The `orders-raw` bucket keeps data and recovery state separate: `events/` contains valid event Parquet files, `invalid-events/` quarantines malformed records, and `checkpoints/` contains only Spark checkpoints. Each query has an independent checkpoint, so a raw-storage failure and an analytics failure are visible separately in the Spark logs.
-
-## Docker Setup
-
-The entire pipeline is containerized and orchestrated via Docker Compose.
-- `kafka`: Apache Kafka container using KRaft, with separate internal Docker (`kafka:9092`) and host (`localhost:9092`) listeners.
-- `kafka-init`: Idempotently creates the three-partition `order-events` topic before producer and Spark start.
-- `minio` and `minio-setup`: Object storage server and a setup container that provisions the `orders-raw` bucket.
-- `mongodb`: The NoSQL database server.
-- `spark`: A container running the PySpark Structured Streaming job.
-- `producer`: The Python data generator and Kafka producer.
-- `dashboard`: The Streamlit web interface.
-
-All containers communicate over a custom Docker bridge network using service names (e.g., `kafka:9092`, `mongodb:27017`). Credentials and hostnames are managed securely via `.env`.
-
-## Setup & Running
+## 🚀 How to Run the Full Pipeline Locally
 
 ### Prerequisites
-- Docker and Docker Compose installed and running.
-- (Optional) Python 3.12 if you want to run components locally outside of Docker.
+- Docker and Docker Compose installed.
 
-### Running the Complete System
-
-1. Clone the repository and navigate to the project directory.
-2. Copy the example environment file:
+### Steps
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/jain6604/real-time-order-analytics-pipeline.git
+   cd real-time-order-analytics-pipeline
+   ```
+2. Copy the environment variables:
    ```bash
    cp .env.example .env
    ```
-3. Start the entire pipeline with Docker Compose:
+3. Start the entire infrastructure (Kafka, MinIO, MongoDB, Spark, Producer, and Dashboard):
    ```bash
    docker compose up --build -d
    ```
+4. **View the Dashboard:** Open `http://localhost:8501`. You will see the green `LIVE PIPELINE` badge indicating data is flowing through Kafka and Spark into MongoDB.
+5. **View the Data Lake:** Open `http://localhost:9001` (Login: `minioadmin` / `minioadmin`) to inspect the raw Parquet archives.
 
-### Verification & Testing
+---
 
-- **Dashboard**: Open [http://localhost:8501](http://localhost:8501) in your browser to view the real-time Streamlit dashboard.
-- **MinIO Console**: Open [http://localhost:9001](http://localhost:9001) (Login: `minioadmin` / `minioadmin`) to verify that raw Parquet files are being written to the `orders-raw` bucket.
-- **MongoDB Data**: Connect to `mongodb://localhost:27017` using a tool like MongoDB Compass to view the `order_analytics.sales_metrics` collection.
+## 🧪 Tests and Quality Checks
 
-### Running Automated Tests
+This project maintains high engineering standards:
+- **Unit Tests:** `pytest tests/` verifies order generation schemas and demo data calculations.
+- **Continuous Integration (CI):** A GitHub Action runs on every push, validating Python syntax, unit tests, and Docker Compose configuration.
+- **Idempotency & Resilience:** PySpark utilizes HDFS/S3 checkpoints to guarantee exactly-once processing semantics, while the MongoDB sink safely upserts windowed metrics to handle restarts gracefully.
 
-To run the Python unit tests locally:
-1. Ensure you have Python 3.12 installed.
-2. Install test dependencies: `pip install pytest -r producer/requirements.txt`
-3. Run `pytest tests/ -v`
-
-### Continuous Integration (CI)
-
-This repository includes a GitHub Actions workflow (`.github/workflows/ci.yml`) that automatically runs on every push and pull request to the `main` branch. It validates:
-- Python syntax and unit tests
-- Docker Compose configuration (`docker compose config`)
-- Docker image buildability
-
-## Example Event
-
-```json
-{
-  "order_id": "ORD10001",
-  "product": "Laptop",
-  "quantity": 2,
-  "price": 65000,
-  "city": "Bengaluru",
-  "timestamp": "2026-09-20T18:40:15"
-}
-```
-
-## Dashboard Features
-
-The Streamlit dashboard (`dashboard/app.py`) retrieves data from MongoDB to show:
-- **KPI Cards**: The latest window's total sales, order count, and average order value.
-- **Sales Trend**: A line chart showing total sales across all 5-minute windows over time.
-- **Top Products**: A bar chart displaying the top-selling products based on total revenue.
-- **Raw Data Viewer**: A sortable table of all processed aggregations.
-
-## Deployment Readiness
-
-**Public deployment status:** A zero-cost, explicitly labeled Streamlit portfolio
-demo is prepared. Its deterministic sample data is not Kafka/Spark output. The
-complete streaming architecture remains reproducible locally with Docker
-Compose. See [DEPLOYMENT.md](DEPLOYMENT.md) for verified limits, cost safety,
-and the account-owned publishing steps.
-
-## Future Improvements
-
-- Add additional dimensions (like `city`) to the Spark aggregations and the Dashboard.
-- Implement Delta Lake instead of raw Parquet in MinIO for ACID transactions on the data lake.
-- Add robust data validation and Dead Letter Queues (DLQs) for malformed JSON events.
+## 📌 Future Enhancements
+- Switch raw Parquet storage to Delta Lake for ACID transaction support in the Data Lake.
+- Implement an explicit Dead Letter Queue (DLQ) in Kafka for malformed messages.

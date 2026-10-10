@@ -87,8 +87,11 @@ def write_metrics_to_mongo(batch: DataFrame, batch_id: int) -> None:
         start = interval["start"].replace(tzinfo=timezone.utc).isoformat()
         end = interval["end"].replace(tzinfo=timezone.utc).isoformat()
         document.update(window_start=start, window_end=end, batch_id=batch_id)
-        identity = {"metric_type": document["metric_type"], "window_start": start,
-                    "product": document.get("product")}
+        identity = {"metric_type": document["metric_type"], "window_start": start}
+        if document.get("product"):
+            identity["product"] = document["product"]
+        if document.get("city"):
+            identity["city"] = document["city"]
         operations.append(ReplaceOne(identity, document, upsert=True))
     collection.bulk_write(operations, ordered=False)
     collection.create_index([("window_start", -1), ("metric_type", 1)])
@@ -111,12 +114,22 @@ def start_streaming_queries(spark: SparkSession):
     event_time = valid_orders.withWatermark("event_time", "1 minute")
     product_metrics = (event_time.groupBy(window(col("event_time"), "5 minutes"), col("product"))
         .agg(_sum("sales").alias("total_sales"), count("order_id").alias("order_count"),
-             _sum("quantity").alias("total_quantity")).withColumn("metric_type", lit("product")))
+             _sum("quantity").alias("total_quantity")).withColumn("metric_type", lit("product"))
+        .withColumn("city", lit(None).cast("string")))
+             
+    city_metrics = (event_time.groupBy(window(col("event_time"), "5 minutes"), col("city"))
+        .agg(_sum("sales").alias("total_sales"), count("order_id").alias("order_count"),
+             _sum("quantity").alias("total_quantity")).withColumn("metric_type", lit("city"))
+        .withColumn("product", lit(None).cast("string")))
+
     window_metrics = (event_time.groupBy(window(col("event_time"), "5 minutes"))
         .agg(_sum("sales").alias("total_sales"), count("order_id").alias("order_count"),
              _sum("quantity").alias("total_quantity"))
-        .withColumn("product", lit(None).cast("string")).withColumn("metric_type", lit("window")))
-    analytics = product_metrics.unionByName(window_metrics)
+        .withColumn("product", lit(None).cast("string"))
+        .withColumn("city", lit(None).cast("string"))
+        .withColumn("metric_type", lit("window")))
+        
+    analytics = product_metrics.unionByName(city_metrics).unionByName(window_metrics)
     analytics_query = (analytics.writeStream.outputMode("update").foreachBatch(write_metrics_to_mongo)
         .option("checkpointLocation", ANALYTICS_CHECKPOINT)
         .queryName("windowed-analytics-to-mongodb").start())

@@ -1,37 +1,49 @@
-"""Deterministic portfolio data used only by the public demo entrypoint."""
+"""Interactive demo data generator for the public Streamlit portfolio."""
 
-from __future__ import annotations
-
+import random
+import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-import pandas as pd
+PRODUCTS = ["Laptop", "Smartphone", "Headphones", "Keyboard", "Mouse", "Monitor", "Tablet", "Smartwatch"]
+CITIES = ["Bengaluru", "Mumbai", "Delhi", "Hyderabad", "Chennai", "Pune", "Kolkata", "Ahmedabad"]
 
-
-def demo_window_metrics() -> pd.DataFrame:
-    """Return a fixed set of five-minute windows for the public demo."""
-    start = datetime(2026, 10, 10, 9, 0, tzinfo=timezone.utc)
-    sales = [184_200, 217_450, 196_800, 245_600, 228_900, 271_300,
-             259_750, 302_100, 288_400, 326_850, 311_200, 354_600]
-    orders = [18, 22, 20, 25, 23, 27, 26, 31, 29, 33, 31, 36]
-    quantities = [41, 49, 44, 58, 52, 63, 59, 71, 67, 76, 70, 83]
-    return pd.DataFrame([
-        {
-            "window_start": start + timedelta(minutes=5 * index),
-            "window_end": start + timedelta(minutes=5 * (index + 1)),
-            "total_sales": sales[index],
-            "order_count": orders[index],
-            "total_quantity": quantities[index],
+def generate_sample_orders(num_orders: int = 200, start_time: datetime = None) -> pd.DataFrame:
+    """Generate a realistic dataset of sample orders."""
+    if start_time is None:
+        start_time = datetime.now(timezone.utc) - timedelta(hours=2)
+        
+    orders = []
+    current_time = start_time
+    
+    for i in range(num_orders):
+        # Slightly randomized time intervals
+        current_time += timedelta(seconds=random.randint(5, 60))
+        
+        product = random.choice(PRODUCTS)
+        quantity = random.randint(1, 4)
+        
+        # Base prices
+        prices = {
+            "Laptop": random.randint(45000, 120000),
+            "Smartphone": random.randint(12000, 80000),
+            "Headphones": random.randint(1000, 15000),
+            "Keyboard": random.randint(800, 8000),
+            "Mouse": random.randint(400, 4000),
+            "Monitor": random.randint(9000, 50000),
+            "Tablet": random.randint(15000, 70000),
+            "Smartwatch": random.randint(2500, 30000),
         }
-        for index in range(len(sales))
-    ])
-
-
-def demo_product_metrics() -> pd.DataFrame:
-    """Return fixed aggregate product metrics matching the dashboard schema."""
-    return pd.DataFrame([
-        {"product": "Laptop", "total_sales": 731_400, "order_count": 16, "total_quantity": 18},
-        {"product": "Smartphone", "total_sales": 618_700, "order_count": 19, "total_quantity": 24},
-        {"product": "Monitor", "total_sales": 522_950, "order_count": 21, "total_quantity": 27},
-        {"product": "Tablet", "total_sales": 407_300, "order_count": 20, "total_quantity": 25},
-        {"product": "Smartwatch", "total_sales": 206_800, "order_count": 22, "total_quantity": 39},
-    ])
+        price = prices[product]
+        
+        orders.append({
+            "order_id": f"ORD-DEMO-{random.randint(10000, 99999)}",
+            "timestamp": current_time,
+            "product": product,
+            "city": random.choice(CITIES),
+            "quantity": quantity,
+            "price": price,
+            "sales": quantity * price
+        })
+        
+    df = pd.DataFrame(orders)
+    return df
